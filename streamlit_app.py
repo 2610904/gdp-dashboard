@@ -1,151 +1,69 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# 1. 페이지 설정 및 초기 데이터 세팅 (세션 상태 활용)
+st.set_page_config(page_title="도서 대출/반납 시스템", layout="centered")
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+if 'book_list' not in st.session_state:
+    st.session_state.book_list = ['어린왕자', '데미안', '드라큘라']
+if 'status_list' not in st.session_state:
+    st.session_state.status_list = ['대출가능', '대출가능', '대출가능']
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# 제목
+st.title("📚 도서 대출 관리 시스템")
+st.write("현재 보유 중인 도서의 목록과 대출 상태입니다.")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# 2. 보유 도서 현황 출력 (st.dataframe 활용)
+df = pd.DataFrame({
+    '도서명': st.session_state.book_list,
+    '상태': st.session_state.status_list
+})
+st.dataframe(df, use_container_width=True)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+st.markdown("---")
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# 3. 메뉴 선택 (Sidebar 또는 Radio 위젯 활용)
+menu = st.radio("원하는 작업을 선택하세요", ('[1] 대출', '[2] 반납'), horizontal=True)
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# --- [1] 대출 로직 ---
+if menu == '[1] 대출':
+    st.subheader("📖 도서 대출")
+    
+    # 대출 가능한 도서만 필터링
+    available_books = [st.session_state.book_list[i] for i in range(len(st.session_state.book_list)) if st.session_state.status_list[i] == '대출가능']
+    
+    if not available_books:
+        st.warning("현재 대출 가능한 도서가 없습니다.")
+    else:
+        # 대출할 도서 선택 (selectbox 위젯 사용)
+        selected_book = st.selectbox("대출할 도서를 선택하세요", available_books)
+        
+        if st.button("대출 신청"):
+            # 선택한 도서의 인덱스를 찾아 상태 변경
+            idx = st.session_state.book_list.index(selected_book)
+            st.session_state.status_list[idx] = '대출중'
+            st.success(f"🎉 '{selected_book}' 도서가 성공적으로 대출되었습니다!")
+            st.rerun() # 화면 즉시 갱신
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+# --- [2] 반납 로직 ---
+elif menu == '[2] 반납':
+    st.subheader("🔄 도서 반납")
+    
+    # 직접 입력받는 구조 (기존 코드의 의도 반영)
+    return_book = st.text_input("반납할 도서명을 정확히 입력하세요:")
+    
+    if st.button("반납 신청"):
+        if return_book in st.session_state.book_list:
+            idx = st.session_state.book_list.index(return_book)
+            
+            # 이미 대출가능한 상태인 경우
+            if st.session_state.status_list[idx] == '대출가능':
+                st.info(f"'{return_book}'은(는) 이미 반납되어 있는 상태입니다.")
+            else:
+                # 반납 성공 처리
+                st.session_state.status_list[idx] = '대출가능'
+                st.success(f"✅ '{return_book}' 반납이 완료되었습니다. 감사합니다!")
+                st.rerun() # 화면 즉시 갱신
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+            # 리스트에 없는 도서일 경우
+            st.error("❌ 잘못된 도서명입니다. 보유 도서 목록을 확인해주세요.")
